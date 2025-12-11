@@ -76,6 +76,18 @@ object FunctionDiffer:
     "_dl_runtime_resolve_xsavec"
   )
 
+  /** Symbols that objdump uses as fallback annotations for unresolved PLT calls.
+    * On Linux, objdump sometimes annotates PLT calls with these symbols when
+    * it can't resolve the actual PLT target. These should be stripped when
+    * usePltSymbols = false.
+    */
+  private val fallbackSymbols = Set[String](
+    "_init",                  // Common fallback on Linux for unresolved PLT calls
+    "deregister_tm_clones",   // Compiler-generated initialization functions
+    "frame_dummy",
+    "register_tm_clones"
+  )
+
   /** Check if a symbol annotation looks like a PLT/stub artifact */
   private def isPltStubSymbol(operands: String): Boolean =
     pltStubSymbols.exists(stub => operands.contains(s"<$stub>") || operands.contains(s"<_$stub>"))
@@ -88,13 +100,28 @@ object FunctionDiffer:
     */
   def normalizeForComparison(i: Instruction, usePltSymbols: Boolean = false): String =
     var operands = i.operands
-      // Normalize hex addresses (e.g., 0x100003f40 -> <addr>)
+      // Normalize hex addresses with 0x prefix (e.g., 0x100003f40 -> <addr>)
       .replaceAll("0x[0-9a-fA-F]+", "<addr>")
+      // Normalize hex addresses without 0x prefix that appear before symbol annotations
+      // This handles call/branch instructions like "call 245d <symbol>" or "call 217 <symbol>"
+      // Pattern: hex digits (3-16 chars) followed by whitespace and < (symbol annotation)
+      // Minimum 3 digits to avoid matching small immediates, but catch short addresses like "217"
+      .replaceAll("\\b([0-9a-fA-F]{3,16})\\s+<", "<addr> <")
       // Normalize numeric offsets in symbol references (e.g., <_main+0x40> -> <_main>)
       // This keeps the symbol name but removes the offset
       .replaceAll("\\+<addr>>", ">")
       .replaceAll("\\+[0-9]+>", ">")
-      // Normalize ARM immediates used as offsets in brackets (e.g., [sp, #16] -> [sp, #<off>])
+    
+    // Also normalize standalone hex addresses at the start of call/branch instruction operands
+    // This catches cases where the address is the first token (e.g., "call 245d" without symbol annotation)
+    val mnemonic = i.mnemonic.toLowerCase
+    if mnemonic == "call" || mnemonic == "jmp" || mnemonic == "bl" || mnemonic == "b" || mnemonic.startsWith("j") then
+      // Match hex address at the start of operands (before any symbol annotation)
+      // Minimum 3 digits to avoid matching small immediates, but catch short addresses like "217"
+      operands = operands.replaceAll("^\\b([0-9a-fA-F]{3,16})\\b", "<addr>")
+    
+    // Normalize ARM immediates used as offsets in brackets (e.g., [sp, #16] -> [sp, #<off>])
+    operands = operands
       .replaceAll("\\[([^,\\]]+),\\s*#-?[0-9]+\\]", "[$1, #<off>]")
       // Normalize standalone ARM immediates NOT in brackets (e.g., #123 -> #<imm>)
       // but only if they look like pure numeric values
@@ -119,12 +146,22 @@ object FunctionDiffer:
         symbolMatch match
           case Some(m) =>
             val symbol = m.group(1)
+            // Check if this is a PLT call (has @plt suffix) - strip these when usePltSymbols = false
+            val isPltCall = symbol.contains("@plt")
+            // Strip @plt suffix if present for comparison
+            val symbolBase = symbol.replace("@plt", "")
+            // Check if this is a fallback symbol that objdump uses for unresolved PLT calls
+            val isFallback = fallbackSymbols.contains(symbolBase) || 
+                            fallbackSymbols.contains(symbolBase.stripPrefix("_"))
             // Keep C++ mangled names and local functions (these are real targets)
-            // Strip annotations for external C library calls (PLT noise)
-            val isRealTarget = symbol.startsWith("__Z") ||  // C++ mangled
-                               symbol.startsWith("_Z") ||   // C++ mangled (Linux)
-                               symbol.contains("+") ||       // Offset within function (internal jump)
-                               symbol.startsWith("__") && !pltStubSymbols.contains(symbol.stripPrefix("_"))
+            // BUT strip PLT calls and fallback symbols (they're unreliable annotations)
+            // Strip annotations for external C library calls (PLT noise) and fallback symbols
+            val isRealTarget = !isPltCall && !isFallback && (
+                               symbolBase.startsWith("__Z") ||  // C++ mangled
+                               symbolBase.startsWith("_Z") ||   // C++ mangled (Linux)
+                               symbolBase.contains("+") ||       // Offset within function (internal jump)
+                               (symbolBase.startsWith("__") && !pltStubSymbols.contains(symbolBase.stripPrefix("_")))
+                             )
             if !isRealTarget then
               operands = operands.replaceAll("<[^>]+>", "").trim
           case None => ()
@@ -139,19 +176,19 @@ object FunctionDiffer:
     *
     * @param oldFn Old function to compare
     * @param newFn New function to compare
-    * @param showPltSymbols If true, keep PLT/stub symbols; if false, filter them
+    * @param useltSymbols If true, keep PLT/stub symbols; if false, filter them
     */
   def diff(
       oldFn: DisassembledFunction,
       newFn: DisassembledFunction,
-      showPltSymbols: Boolean = false
+      usePltSymbols: Boolean = false
   ): DetailedFunctionDiff =
     val oldInstructions = oldFn.instructions
     val newInstructions = newFn.instructions
 
     // Use address-normalized instructions for comparison
-    val oldNorm = oldInstructions.map(i => normalizeForComparison(i, showPltSymbols))
-    val newNorm = newInstructions.map(i => normalizeForComparison(i, showPltSymbols))
+    val List(oldNorm, newNorm) = List(oldInstructions, newInstructions).map: instructions =>
+      instructions.map(normalizeForComparison(_, usePltSymbols))
 
     // Compute LCS (Longest Common Subsequence)
     val lcs = computeLCS(oldNorm, newNorm)
