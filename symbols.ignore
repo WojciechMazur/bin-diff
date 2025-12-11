@@ -5,7 +5,8 @@
 GCC_except_table*
 
 # Dynamic linker internals
-_?dyld_*
+dyld_*
+_+dyld_*
 
 # Stub helpers and PLT
 _+stub_helper

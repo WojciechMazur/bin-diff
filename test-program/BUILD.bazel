@@ -5,6 +5,7 @@ COPTS = [
     "-Werror",
 ]
 
+# Static libraries (cc_library produces .a by default)
 cc_library(
     name = "math_utils",
     srcs = ["src/math_utils.cpp"],
@@ -17,15 +18,45 @@ cc_library(
 cc_library(
     name = "logger",
     srcs = ["src/logger.cpp"],
+    hdrs = ["src/logger.h"],
     copts = COPTS,
     defines = [
         "VERBOSE_LOGS=1",
     ],
-    hdrs = ["src/logger.h"],
     includes = ["src"],
     visibility = ["//visibility:public"],
 )
 
+# Library with identical settings in both build systems (no defines)
+cc_library(
+    name = "string_utils",
+    srcs = ["src/string_utils.cpp"],
+    hdrs = ["include/string_utils.h"],
+    copts = COPTS,
+    includes = ["include"],
+    visibility = ["//visibility:public"],
+)
+
+# Shared libraries (.so/.dylib)
+cc_shared_library(
+    name = "math_utils_shared",
+    deps = [":math_utils"],
+    visibility = ["//visibility:public"],
+)
+
+cc_shared_library(
+    name = "string_utils_shared",
+    deps = [":string_utils"],
+    visibility = ["//visibility:public"],
+)
+
+cc_shared_library(
+    name = "logger_shared",
+    deps = [":logger"],
+    visibility = ["//visibility:public"],
+)
+
+# Executable
 cc_binary(
     name = "demo",
     srcs = ["src/main.cpp"],
