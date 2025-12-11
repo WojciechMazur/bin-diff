@@ -1,0 +1,38 @@
+COPTS = [
+    # "-O3",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+]
+
+cc_library(
+    name = "math_utils",
+    srcs = ["src/math_utils.cpp"],
+    hdrs = ["include/math_utils.h"],
+    copts = COPTS,
+    includes = ["include"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "logger",
+    srcs = ["src/logger.cpp"],
+    copts = COPTS,
+    defines = [
+        "VERBOSE_LOGS=1",
+    ],
+    hdrs = ["src/logger.h"],
+    includes = ["src"],
+    visibility = ["//visibility:public"],
+)
+
+cc_binary(
+    name = "demo",
+    srcs = ["src/main.cpp"],
+    copts = COPTS,
+    deps = [
+        ":math_utils",
+        ":logger",
+    ],
+)
+

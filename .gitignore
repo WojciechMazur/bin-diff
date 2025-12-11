@@ -1,0 +1,12 @@
+.bsp/
+.metals/
+.vscode/
+.cursor/
+.scala-build/
+.bazelbsp/
+test-program/cmake-build/
+test-program/bazel-bin
+test-program/bazel-out
+test-program/bazel-test-program
+test-program/bazel-testlogs
+test-program/.bazelproject

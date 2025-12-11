@@ -1,0 +1,54 @@
+# Ignore patterns for binary comparison
+# One glob pattern per line
+
+# GCC exception tables (vary between compilers)
+GCC_except_table*
+
+# Dynamic linker internals
+_?dyld_*
+
+# Stub helpers and PLT
+_+stub_helper
+_+stubs
+
+# C++ standard library (libc++ / libstdc++)
+# Mangled names start with _ZNSt (Itanium ABI) or _ZSt
+# Also match __ZNKSt for const member functions
+# __ZZ* are local/nested symbols (lambdas inside std::)
+_+ZNSt*
+_+ZNKSt*
+_+ZZNSt*
+_+ZSt*
+
+# C++ new/delete operators
+_+Znw*
+_+Zna*
+_+Zdl*
+_+Zda*
+
+# C++ typeinfo and vtables
+_+ZTI*
+_+ZTS*
+_+ZTV*
+
+# C++ exception handling
+_+cxa_*
+
+# Clang runtime helpers
+_+clang_call_terminate
+
+# C runtime
+_+stack_chk_*
+_+memcpy_chk
+_+memmove_chk
+_+memset_chk
+
+# libSystem / libc internals
+_+malloc*
+_+free*
+_+realloc*
+_+calloc*
+_+bzero
+_+memcpy
+_+memmove
+_+memset
