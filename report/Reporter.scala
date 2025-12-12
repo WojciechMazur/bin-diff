@@ -2,6 +2,7 @@ package report
 
 import model.*
 import analysis.*
+import process.*
 
 /** ANSI color codes for terminal output */
 object Colors:
@@ -18,18 +19,35 @@ object Colors:
 object Reporter:
   import Colors.*
 
+  // Shared runner for demangling
+  private val defaultRunner: ProcessRunner = process.DefaultProcessRunner()
+
   /** Print the full comparison report to stdout */
-  def printReport(result: ComparisonResult, verbose: Boolean): Unit =
+  def printReport(result: ComparisonResult, verbose: Boolean, runner: ProcessRunner = defaultRunner): Unit =
+    // Collect all symbol names for batch demangling
+    val allSymbolNames = collectAllSymbolNames(result)
+    val demangleMap = Demangler.demangleBatch(allSymbolNames, runner)
+
     printHeader()
     printBinaryInfo(result.binaryInfo)
     printBitEquivalence(result.bitEquivalence)
 
     if !result.bitEquivalence.identical then
-      result.symbolDiff.foreach(printSymbolDiff(_, verbose))
-      result.functionDiff.foreach(printFunctionDiff(_, verbose))
+      result.symbolDiff.foreach(printSymbolDiff(_, verbose, demangleMap))
+      result.functionDiff.foreach(printFunctionDiff(_, verbose, demangleMap))
       result.stringDiff.foreach(printStringDiff(_, verbose))
 
     printSummary(result)
+
+  /** Collect all symbol names from the result for batch demangling */
+  private def collectAllSymbolNames(result: ComparisonResult): Seq[String] =
+    val symbolNames = result.symbolDiff.toSeq.flatMap { sd =>
+      sd.added.map(_.name) ++ sd.removed.map(_.name) ++ sd.changed.map(_.name)
+    }
+    val functionNames = result.functionDiff.toSeq.flatMap { fd =>
+      fd.added.map(_.name) ++ fd.removed.map(_.name) ++ fd.modified.map(_.name)
+    }
+    (symbolNames ++ functionNames).distinct
 
   private def printHeader(): Unit =
     println()
@@ -62,7 +80,7 @@ object Reporter:
         println(s"    Size difference: $sign${formatSize(diff)}")
     println()
 
-  private def printSymbolDiff(diff: SymbolDiff, verbose: Boolean): Unit =
+  private def printSymbolDiff(diff: SymbolDiff, verbose: Boolean, demangleMap: Map[String, String]): Unit =
     val stats = SymbolComparator.stats(diff)
     println(s"${Bold}Step 2: Symbol Comparison$Reset")
     println(s"  Total symbols: ${stats.totalOld} (old) → ${stats.totalNew} (new)")
@@ -72,7 +90,8 @@ object Reporter:
       println(s"  ${Green}Added: ${diff.added.size}$Reset")
       if verbose then
         diff.added.take(20).foreach { s =>
-          println(s"    $Green+ ${s.name}$Reset ($Gray${s.kind}$Reset)")
+          val displayName = formatSymbolName(s.name, demangleMap)
+          println(s"    $Green+ $displayName$Reset ($Gray${s.kind}$Reset)")
         }
         if diff.added.size > 20 then
           println(s"    $Gray... and ${diff.added.size - 20} more$Reset")
@@ -81,7 +100,8 @@ object Reporter:
       println(s"  ${Red}Removed: ${diff.removed.size}$Reset")
       if verbose then
         diff.removed.take(20).foreach { s =>
-          println(s"    $Red- ${s.name}$Reset ($Gray${s.kind}$Reset)")
+          val displayName = formatSymbolName(s.name, demangleMap)
+          println(s"    $Red- $displayName$Reset ($Gray${s.kind}$Reset)")
         }
         if diff.removed.size > 20 then
           println(s"    $Gray... and ${diff.removed.size - 20} more$Reset")
@@ -90,7 +110,8 @@ object Reporter:
       println(s"  ${Yellow}Changed: ${diff.changed.size}$Reset")
       if verbose then
         diff.changed.take(10).foreach { c =>
-          println(s"    $Yellow~ ${c.name}$Reset")
+          val displayName = formatSymbolName(c.name, demangleMap)
+          println(s"    $Yellow~ $displayName$Reset")
           c.changes.foreach(change => println(s"      $Gray$change$Reset"))
         }
         if diff.changed.size > 10 then
@@ -98,7 +119,7 @@ object Reporter:
 
     println()
 
-  private def printFunctionDiff(diff: FunctionDiff, verbose: Boolean): Unit =
+  private def printFunctionDiff(diff: FunctionDiff, verbose: Boolean, demangleMap: Map[String, String]): Unit =
     val summary = FunctionComparator.summary(diff)
     println(s"${Bold}Step 3: Function Body Comparison$Reset")
     println(s"  Total functions: ${summary.totalOld} (old) → ${summary.totalNew} (new)")
@@ -119,7 +140,8 @@ object Reporter:
               val newCount = fcr.newInstructionCount.getOrElse(0)
               val cfFlag = if d.changedControlFlow then s"${Yellow}[CF]$Reset " else ""
               val callFlag = if d.changedCalls then s"${Yellow}[CALL]$Reset " else ""
-              println(s"    $Yellow~ ${fcr.name}$Reset $cfFlag$callFlag")
+              val displayName = formatSymbolName(fcr.name, demangleMap)
+              println(s"    $Yellow~ $displayName$Reset $cfFlag$callFlag")
               println(s"      $Gray$oldCount → $newCount instructions, +${d.added.size}/-${d.removed.size}$Reset")
             case _ => ()
         }
@@ -131,7 +153,8 @@ object Reporter:
       if verbose then
         diff.added.take(10).foreach { fcr =>
           val count = fcr.newInstructionCount.getOrElse(0)
-          println(s"    $Green+ ${fcr.name}$Reset ($Gray$count instructions$Reset)")
+          val displayName = formatSymbolName(fcr.name, demangleMap)
+          println(s"    $Green+ $displayName$Reset ($Gray$count instructions$Reset)")
         }
         if diff.added.size > 10 then
           println(s"    $Gray... and ${diff.added.size - 10} more$Reset")
@@ -141,7 +164,8 @@ object Reporter:
       if verbose then
         diff.removed.take(10).foreach { fcr =>
           val count = fcr.oldInstructionCount.getOrElse(0)
-          println(s"    $Red- ${fcr.name}$Reset ($Gray$count instructions$Reset)")
+          val displayName = formatSymbolName(fcr.name, demangleMap)
+          println(s"    $Red- $displayName$Reset ($Gray$count instructions$Reset)")
         }
         if diff.removed.size > 10 then
           println(s"    $Gray... and ${diff.removed.size - 10} more$Reset")
@@ -190,6 +214,12 @@ object Reporter:
   private def truncateString(s: String, maxLen: Int): String =
     if s.length <= maxLen then s
     else s.take(maxLen - 3) + "..."
+
+  /** Format a symbol name with demangled version if available */
+  private def formatSymbolName(name: String, demangleMap: Map[String, String]): String =
+    demangleMap.get(name) match
+      case Some(demangled) => s"$name\n        $Gray($demangled)$Reset"
+      case None            => name
 
   private def printSummary(result: ComparisonResult): Unit =
     println(s"$Bold$Cyan╔══════════════════════════════════════════════════════════════════╗$Reset")

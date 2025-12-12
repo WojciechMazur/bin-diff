@@ -282,13 +282,18 @@ object FunctionDiffer:
       diff: DetailedFunctionDiff,
       contextLines: Int = 3,
       normalizeAddresses: Boolean = true,
-      usePltSymbols: Boolean = false
+      usePltSymbols: Boolean = false,
+      runner: Option[process.ProcessRunner] = None
   ): String =
     val sb = new StringBuilder
     val Colors = report.Colors
 
-    // Header
-    sb.append(s"${Colors.Bold}${Colors.Cyan}--- old/${diff.functionName}${Colors.Reset}\n")
+    // Header with optional demangled name
+    val demangledSuffix = runner.flatMap(r => Demangler.demangle(diff.functionName, r)) match
+      case Some(demangled) => s"\n${Colors.Gray}($demangled)${Colors.Reset}"
+      case None => ""
+
+    sb.append(s"${Colors.Bold}${Colors.Cyan}--- old/${diff.functionName}${Colors.Reset}$demangledSuffix\n")
     sb.append(s"${Colors.Bold}${Colors.Cyan}+++ new/${diff.functionName}${Colors.Reset}\n")
     sb.append("\n")
 

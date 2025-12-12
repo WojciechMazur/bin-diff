@@ -340,7 +340,8 @@ def showDiff(
               diff,
               contextLines = 3,
               normalizeAddresses = config.normalizeAddresses,
-              usePltSymbols = config.usePltSymbols
+              usePltSymbols = config.usePltSymbols,
+              runner = Some(runner)
             )
             println(formatted)
             println(s"${report.Colors.Gray}${"─" * 70}${report.Colors.Reset}\n")
